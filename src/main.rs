@@ -7,14 +7,15 @@ use std::{
     io::{Read, Write},
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
+    time::Instant,
 };
 use walkdir::WalkDir;
 use filetime::FileTime;
 
 fn main() {
     let matches = Command::new("rcp")
-    .version("0.1")
-    .about("Rust-based cp/mv alternative")
+    .version("0.2.0")
+    .about("🚀 Fast and colorful Rust-based cp/mv alternative")
     .arg(Arg::new("source").required(true))
     .arg(Arg::new("destination").required(true))
     .arg(Arg::new("recursive")
@@ -32,6 +33,7 @@ fn main() {
     .long("verbose")
     .action(ArgAction::SetTrue)
     .help("Verbose output"))
+    .color(clap::ColorChoice::Always) // Цветной -h
     .get_matches();
 
     let src = PathBuf::from(matches.get_one::<String>("source").unwrap());
@@ -41,13 +43,17 @@ fn main() {
     let verbose = matches.get_flag("verbose");
 
     if src.is_file() {
-        copy_file(&src, &dst, preserve, verbose).unwrap();
+        if let Err(e) = copy_file(&src, &dst, preserve, verbose) {
+            eprintln!("{}: {}", "Error".bright_red(), e);
+        }
     } else if src.is_dir() {
         if !recursive {
             eprintln!("{}", "Use -r to copy directories.".bright_red());
             std::process::exit(1);
         }
-        copy_dir_recursive(&src, &dst, preserve, verbose).unwrap();
+        if let Err(e) = copy_dir_recursive(&src, &dst, preserve, verbose) {
+            eprintln!("{}: {}", "Error".bright_red(), e);
+        }
     } else {
         eprintln!("{}", "Source not found.".bright_red());
     }
@@ -68,12 +74,13 @@ fn copy_file(src: &Path, dst: &Path, preserve: bool, verbose: bool) -> std::io::
     let bar = ProgressBar::new(total_size);
     bar.set_style(
         ProgressStyle::with_template(
-            "[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} ({eta})",
+            "[{elapsed_precise}] {bar:40.cyan/blue} {bytes}/{total_bytes} ({bytes_per_sec}, ETA: {eta})",
         )
         .unwrap()
         .progress_chars("=> "),
     );
 
+    let start = Instant::now();
     let mut reader = File::open(src)?;
     let mut writer = OpenOptions::new().create(true).write(true).truncate(true).open(dst)?;
 
@@ -90,7 +97,12 @@ fn copy_file(src: &Path, dst: &Path, preserve: bool, verbose: bool) -> std::io::
         bar.set_position(copied);
     }
 
-    bar.finish_and_clear();
+    bar.finish_with_message(format!(
+        "{} {} in {:.2?}",
+        "Done".green(),
+                                    dst.display(),
+                                    start.elapsed()
+    ));
 
     if preserve {
         fs::set_permissions(dst, metadata.permissions())?;
@@ -119,4 +131,3 @@ fn copy_dir_recursive(src: &Path, dst: &Path, preserve: bool, verbose: bool) -> 
     }
     Ok(())
 }
-
